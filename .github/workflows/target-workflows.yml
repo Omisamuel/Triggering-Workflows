@@ -1,0 +1,58 @@
+name: My Target Workflow
+
+on:
+  repository_dispatch:
+    types: [trigger-workflow]
+    
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Payload
+        run: |
+          if [[ -z "${{ github.event.client_payload.service }}" || -z "${{ github.event.client_payload.version }}" || -z "${{ github.event.client_payload.sha }}" ]]; then
+            echo "::error::Missing required payload parameters (service, version, or sha)"
+            exit 1
+          fi
+          echo "::notice::Received deployment request for ${{ github.event.client_payload.service }} version ${{ github.event.client_payload.version }}"
+
+      - name: Checkout code at specific commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.sha }}
+          fetch-depth: 0  # Fetch all history for proper verification
+      
+      - name: Verify Commit Exists
+        run: |
+          if ! git rev-parse --quiet --verify ${{ github.event.client_payload.sha }}^{commit}; then
+            echo "::error::Specified commit SHA does not exist in the repository"
+            exit 1
+          fi
+
+      - name: Log Deployment Information
+        run: |
+          echo "Deploying service: ${{ github.event.client_payload.service }}"
+          echo "Deploying version: ${{ github.event.client_payload.version }}"
+          echo "Commit SHA: ${{ github.event.client_payload.sha }}"
+          echo "Triggered by: ${{ github.event.sender.login }}"
+
+      - name: Set deployment status
+        run: |
+          echo "DEPLOY_STATUS=pending" >> $GITHUB_ENV
+          
+      # Add your deployment steps here
+      
+      - name: Update deployment status
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "DEPLOY_STATUS=success" >> $GITHUB_ENV
+          else
+            echo "DEPLOY_STATUS=failure" >> $GITHUB_ENV
+          fi
+          
+      - name: Notify deployment result
+        if: always()
+        run: |
+          echo "::notice::Deployment $DEPLOY_STATUS for ${{ github.event.client_payload.service }} version ${{ github.event.client_payload.version }}"
